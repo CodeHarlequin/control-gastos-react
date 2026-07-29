@@ -9,6 +9,10 @@ const dataDirectory = join(rootDirectory, 'data');
 const databasePath = join(dataDirectory, 'control-gastos.sqlite');
 const distDirectory = join(rootDirectory, 'dist');
 const port = Number(process.env.PORT || 5174);
+const isolationHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+};
 
 mkdirSync(dataDirectory, { recursive: true });
 
@@ -31,7 +35,10 @@ const writeState = database.prepare(`
 `);
 
 function sendJson(response, statusCode, body) {
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.writeHead(statusCode, {
+    ...isolationHeaders,
+    'Content-Type': 'application/json; charset=utf-8',
+  });
   response.end(JSON.stringify(body));
 }
 
@@ -92,8 +99,13 @@ function serveStaticFile(request, response) {
     '.js': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
     '.svg': 'image/svg+xml',
+    '.wasm': 'application/wasm',
+    '.webmanifest': 'application/manifest+json; charset=utf-8',
   };
-  response.writeHead(200, { 'Content-Type': contentTypes[extname(filePath)] || 'application/octet-stream' });
+  response.writeHead(200, {
+    ...isolationHeaders,
+    'Content-Type': contentTypes[extname(filePath)] || 'application/octet-stream',
+  });
   createReadStream(filePath).pipe(response);
 }
 

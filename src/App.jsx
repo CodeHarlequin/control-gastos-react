@@ -546,7 +546,7 @@ export default function App() {
   const { now, currentMonth, today } = todayValues();
   const [data, setData] = useState(defaultData);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [dataStatus, setDataStatus] = useState('Conectando con SQLite…');
+  const [dataStatus, setDataStatus] = useState('Abriendo SQLite local…');
   const [activeModal, setActiveModal] = useState(null);
   const [toast, setToast] = useState('');
   const [viewMode, setViewMode] = useState('month');
@@ -623,12 +623,12 @@ export default function App() {
           accountName: storedData.openingBalance?.accountName || '',
         });
         setIsDataLoaded(true);
-        setDataStatus('Datos cargados desde SQLite.');
+        setDataStatus('Datos cargados desde SQLite local.');
       })
       .catch((error) => {
         if (!active) return;
         console.warn(error);
-        setDataStatus('No se pudo conectar con SQLite. Los cambios no se guardarán.');
+        setDataStatus('No se pudo abrir SQLite local. Los cambios no se guardarán.');
       });
     return () => {
       active = false;
@@ -639,7 +639,7 @@ export default function App() {
     if (!isDataLoaded) return undefined;
     const timeout = window.setTimeout(() => {
       saveBudgetData(data)
-        .then(() => setDataStatus('Datos guardados en SQLite.'))
+        .then(() => setDataStatus('Datos guardados en SQLite local.'))
         .catch((error) => {
           console.warn(error);
           setDataStatus('Error al guardar en SQLite.');

@@ -13,6 +13,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@tailwindcss/vite": "^4.3.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
