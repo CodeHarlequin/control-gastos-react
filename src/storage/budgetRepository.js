@@ -54,32 +54,68 @@ function normalizeBudgetData(data) {
   };
 }
 
-async function loadLegacyServerData() {
-  try {
-    const response = await fetch('/api/budget');
-    if (!response.ok) return null;
-    const body = await response.json();
-    return body.data || null;
-  } catch {
-    return null;
+async function loadServerData() {
+  const response = await fetch('/api/budget');
+  if (!response.ok) {
+    throw new Error(`No se pudieron cargar los datos del servidor (${response.status}).`);
+  }
+  const body = await response.json();
+  return body.data || null;
+}
+
+async function saveServerData(data) {
+  const response = await fetch('/api/budget', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data }),
+  });
+  if (!response.ok) {
+    throw new Error(`No se pudieron guardar los datos en el servidor (${response.status}).`);
   }
 }
 
 async function saveBudgetData(data) {
-  await runSqliteOperation('save', data);
+  const results = await Promise.allSettled([
+    saveServerData(data),
+    runSqliteOperation('save', data),
+  ]);
+
+  if (results.every(({ status }) => status === 'rejected')) {
+    throw new AggregateError(
+      results.map(({ reason }) => reason),
+      'No se pudieron guardar los datos.',
+    );
+  }
 }
 
 async function loadBudgetData() {
-  const storedData = await runSqliteOperation('load');
-  if (storedData) return normalizeBudgetData(storedData);
+  const [serverResult, localResult] = await Promise.allSettled([
+    loadServerData(),
+    runSqliteOperation('load'),
+  ]);
 
-  const legacyData = await loadLegacyServerData();
-  if (legacyData) {
-    await saveBudgetData(legacyData);
-    return normalizeBudgetData(legacyData);
+  if (serverResult.status === 'fulfilled' && serverResult.value) {
+    return normalizeBudgetData(serverResult.value);
   }
 
-  return createEmptyBudgetData();
+  if (localResult.status === 'fulfilled' && localResult.value) {
+    const localData = normalizeBudgetData(localResult.value);
+    if (serverResult.status === 'fulfilled') {
+      await saveServerData(localData);
+    }
+    return localData;
+  }
+
+  if (serverResult.status === 'fulfilled' || localResult.status === 'fulfilled') {
+    return createEmptyBudgetData();
+  }
+
+  throw new AggregateError(
+    [serverResult.reason, localResult.reason],
+    'No se pudo abrir ningún almacenamiento.',
+  );
 }
 
 export {
