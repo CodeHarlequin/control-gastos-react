@@ -546,7 +546,7 @@ export default function App() {
   const { now, currentMonth, today } = todayValues();
   const [data, setData] = useState(defaultData);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [dataStatus, setDataStatus] = useState('Abriendo la base de datos…');
+  const [dataStatus, setDataStatus] = useState('Abriendo el almacenamiento local…');
   const [activeModal, setActiveModal] = useState(null);
   const [toast, setToast] = useState('');
   const [viewMode, setViewMode] = useState('month');
@@ -623,12 +623,12 @@ export default function App() {
           accountName: storedData.openingBalance?.accountName || '',
         });
         setIsDataLoaded(true);
-        setDataStatus('Datos cargados desde la base de datos.');
+        setDataStatus('Datos cargados desde este dispositivo.');
       })
       .catch((error) => {
         if (!active) return;
         console.warn(error);
-        setDataStatus('No se pudo abrir la base de datos. Los cambios no se guardarán.');
+        setDataStatus('No se pudo abrir el almacenamiento local. Los cambios no se guardarán.');
       });
     return () => {
       active = false;
@@ -639,10 +639,10 @@ export default function App() {
     if (!isDataLoaded) return undefined;
     const timeout = window.setTimeout(() => {
       saveBudgetData(data)
-        .then(() => setDataStatus('Datos guardados en la base de datos.'))
+        .then(() => setDataStatus('Datos guardados en este dispositivo.'))
         .catch((error) => {
           console.warn(error);
-          setDataStatus('Error al guardar en la base de datos.');
+          setDataStatus('Error al guardar en este dispositivo.');
         });
     }, 200);
     return () => window.clearTimeout(timeout);

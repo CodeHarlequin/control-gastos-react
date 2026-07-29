@@ -12,6 +12,9 @@ function createEmptyBudgetData() {
 let sqliteWorker;
 let requestId = 0;
 const pendingRequests = new Map();
+const indexedDbName = 'control-gastos';
+const indexedDbStore = 'budget_state';
+const localStorageKey = 'control-gastos-budget';
 
 function getSqliteWorker() {
   if (!sqliteWorker) {
@@ -54,67 +57,137 @@ function normalizeBudgetData(data) {
   };
 }
 
-async function loadServerData() {
-  const response = await fetch('/api/budget');
-  if (!response.ok) {
-    throw new Error(`No se pudieron cargar los datos del servidor (${response.status}).`);
-  }
-  const body = await response.json();
-  return body.data || null;
+function openIndexedDb() {
+  return new Promise((resolve, reject) => {
+    if (!globalThis.indexedDB) {
+      reject(new Error('IndexedDB no está disponible.'));
+      return;
+    }
+
+    const request = globalThis.indexedDB.open(indexedDbName, 1);
+    request.addEventListener('upgradeneeded', () => {
+      if (!request.result.objectStoreNames.contains(indexedDbStore)) {
+        request.result.createObjectStore(indexedDbStore, { keyPath: 'id' });
+      }
+    });
+    request.addEventListener('success', () => resolve(request.result));
+    request.addEventListener('error', () => {
+      reject(request.error || new Error('No se pudo abrir IndexedDB.'));
+    });
+    request.addEventListener('blocked', () => {
+      reject(new Error('La apertura de IndexedDB está bloqueada.'));
+    });
+  });
 }
 
-async function saveServerData(data) {
-  const response = await fetch('/api/budget', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data }),
-  });
-  if (!response.ok) {
-    throw new Error(`No se pudieron guardar los datos en el servidor (${response.status}).`);
+async function loadIndexedDbData() {
+  const database = await openIndexedDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = database
+        .transaction(indexedDbStore, 'readonly')
+        .objectStore(indexedDbStore)
+        .get(1);
+      request.addEventListener('success', () => resolve(request.result?.payload || null));
+      request.addEventListener('error', () => {
+        reject(request.error || new Error('No se pudo leer IndexedDB.'));
+      });
+    });
+  } finally {
+    database.close();
   }
+}
+
+async function saveIndexedDbData(data) {
+  const database = await openIndexedDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(indexedDbStore, 'readwrite');
+      transaction.objectStore(indexedDbStore).put({
+        id: 1,
+        payload: data,
+        updatedAt: new Date().toISOString(),
+      });
+      transaction.addEventListener('complete', resolve);
+      transaction.addEventListener('error', () => {
+        reject(transaction.error || new Error('No se pudo guardar en IndexedDB.'));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error || new Error('Se canceló el guardado en IndexedDB.'));
+      });
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function loadLocalStorageData() {
+  const storedData = globalThis.localStorage.getItem(localStorageKey);
+  return storedData ? JSON.parse(storedData) : null;
+}
+
+function saveLocalStorageData(data) {
+  globalThis.localStorage.setItem(localStorageKey, JSON.stringify(data));
 }
 
 async function saveBudgetData(data) {
   const results = await Promise.allSettled([
-    saveServerData(data),
-    runSqliteOperation('save', data),
+    saveIndexedDbData(data),
+    Promise.resolve().then(() => saveLocalStorageData(data)),
   ]);
 
   if (results.every(({ status }) => status === 'rejected')) {
     throw new AggregateError(
       results.map(({ reason }) => reason),
-      'No se pudieron guardar los datos.',
+      'No se pudieron guardar los datos en el dispositivo.',
     );
   }
 }
 
+async function migrateLegacyData() {
+  try {
+    const legacyData = await runSqliteOperation('load');
+    if (!legacyData) return null;
+
+    const normalizedData = normalizeBudgetData(legacyData);
+    await saveBudgetData(normalizedData);
+    return normalizedData;
+  } catch {
+    return null;
+  }
+}
+
 async function loadBudgetData() {
-  const [serverResult, localResult] = await Promise.allSettled([
-    loadServerData(),
-    runSqliteOperation('load'),
+  const [indexedDbResult, localStorageResult] = await Promise.allSettled([
+    loadIndexedDbData(),
+    Promise.resolve().then(() => loadLocalStorageData()),
   ]);
 
-  if (serverResult.status === 'fulfilled' && serverResult.value) {
-    return normalizeBudgetData(serverResult.value);
+  if (indexedDbResult.status === 'fulfilled' && indexedDbResult.value) {
+    return normalizeBudgetData(indexedDbResult.value);
   }
 
-  if (localResult.status === 'fulfilled' && localResult.value) {
-    const localData = normalizeBudgetData(localResult.value);
-    if (serverResult.status === 'fulfilled') {
-      await saveServerData(localData);
+  if (localStorageResult.status === 'fulfilled' && localStorageResult.value) {
+    const localData = normalizeBudgetData(localStorageResult.value);
+    if (indexedDbResult.status === 'fulfilled') {
+      await saveIndexedDbData(localData);
     }
     return localData;
   }
 
-  if (serverResult.status === 'fulfilled' || localResult.status === 'fulfilled') {
+  const legacyData = await migrateLegacyData();
+  if (legacyData) return legacyData;
+
+  if (
+    indexedDbResult.status === 'fulfilled'
+    || localStorageResult.status === 'fulfilled'
+  ) {
     return createEmptyBudgetData();
   }
 
   throw new AggregateError(
-    [serverResult.reason, localResult.reason],
-    'No se pudo abrir ningún almacenamiento.',
+    [indexedDbResult.reason, localStorageResult.reason],
+    'No se pudo abrir el almacenamiento local del dispositivo.',
   );
 }
 
